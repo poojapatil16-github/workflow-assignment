@@ -18,7 +18,7 @@ Production-oriented **Express 5 + TypeScript + Prisma + PostgreSQL** service for
    The project includes a full Docker setup for the database, backend, and frontend.
 
    ```bash
-   docker-compose up --build
+   docker-compose up --build -d
    ```
 
    - Frontend: `http://localhost` (Port 80)
