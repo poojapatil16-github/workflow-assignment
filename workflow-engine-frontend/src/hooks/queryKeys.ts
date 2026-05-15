@@ -1,0 +1,15 @@
+export const queryKeys = {
+  health: ['health'] as const,
+  me: ['auth', 'me'] as const,
+  tenants: ['tenants'] as const,
+  tenantMembers: (id: string) => ['tenants', id, 'members'] as const,
+  users: ['users'] as const,
+  workflows: (params: Record<string, unknown>) => ['workflows', params] as const,
+  workflow: (id: string) => ['workflows', id] as const,
+  items: (params: Record<string, unknown>) => ['items', params] as const,
+  item: (id: string) => ['items', id] as const,
+  approvalsPending: ['approvals', 'pending'] as const,
+  delegations: ['delegations'] as const,
+  audit: (params: Record<string, unknown>) => ['audit', params] as const,
+  sla: (params: Record<string, unknown>) => ['sla', params] as const,
+};

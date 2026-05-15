@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Platform-wide privilege; ADMIN sees all tenants without membership rows.
+enum GlobalRole {
+  ADMIN
+  USER
+}
+
+/// Granted per tenant; one user may hold multiple scopes in the same tenant.
+enum TenantScopedRole {
+  CREATOR
+  APPROVER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum WorkflowVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ApprovalMode {
+  SINGLE
+  ALL
+  QUORUM
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApprovalDecision {
+  APPROVE
+  REJECT
+}
+
+enum AuditAction {
+  ITEM_CREATED
+  ITEM_TRANSITIONED
+  ITEM_TRANSITION_BLOCKED
+  APPROVAL_CREATED
+  APPROVAL_APPROVED
+  APPROVAL_REJECTED
+  DELEGATION_CREATED
+  WORKFLOW_CREATED
+  WORKFLOW_VERSION_CREATED
+  WORKFLOW_PUBLISHED
+  SLA_RULE_CREATED
+  SLA_ESCALATION
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members     TenantMember[]
+  workflows   Workflow[]
+  items       Item[]
+  delegations Delegation[]
+  slaRules    SlaRule[]
+  auditLogs   AuditLog[]
+  approvals   Approval[]
+  escalations Escalation[]
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  name         String?
+  status       UserStatus  @default(ACTIVE)
+  globalRole   GlobalRole  @default(USER)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  memberships         TenantMember[]
+  itemTransitions     ItemTransition[] @relation("ItemTransitionActor")
+  delegationsFrom     Delegation[]     @relation("DelegationFrom")
+  delegationsTo       Delegation[]     @relation("DelegationTo")
+  itemsCreated        Item[]           @relation("ItemCreator")
+  approvalAssignments ApprovalVote[]   @relation("ApprovalVoteAssignee")
+
+  @@index([email])
+}
+
+model TenantMember {
+  id        String              @id @default(uuid())
+  tenantId  String
+  userId    String
+  roles     TenantScopedRole[] @default([])
+  createdAt DateTime            @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model Workflow {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  versions WorkflowVersion[]
+  items    Item[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model WorkflowVersion {
+  id          String                @id @default(uuid())
+  workflowId  String
+  version     Int
+  status      WorkflowVersionStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime              @default(now())
+
+  workflow    Workflow             @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  states      WorkflowState[]
+  transitions WorkflowTransition[]
+  items       Item[]
+  slaRules    SlaRule[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId])
+  @@index([status])
+}
+
+model WorkflowState {
+  id                String  @id @default(uuid())
+  workflowVersionId String
+  name              String
+  isInitial         Boolean @default(false)
+  isTerminal        Boolean @default(false)
+  metadata          Json?
+
+  workflowVersion WorkflowVersion      @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  outgoing        WorkflowTransition[] @relation("TransitionFrom")
+  incoming        WorkflowTransition[] @relation("TransitionTo")
+  itemsCurrent    Item[]               @relation("ItemCurrentState")
+  slaRules        SlaRule[]
+
+  @@unique([workflowVersionId, name])
+  @@index([workflowVersionId])
+}
+
+/// Definition graph for a workflow version. Immutable after version is published (enforced in services).
+model WorkflowTransition {
+  id                String        @id @default(uuid())
+  workflowVersionId String
+  fromStateId       String
+  toStateId         String
+  name              String
+  requiresApproval  Boolean       @default(false)
+  approvalMode      ApprovalMode?
+  quorumCount       Int?
+  /// Explicit approver user IDs for this transition (tenant members).
+  approverUserIds   Json          @default("[]")
+  validationRules   Json?
+
+  workflowVersion WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  fromState       WorkflowState   @relation("TransitionFrom", fields: [fromStateId], references: [id], onDelete: Cascade)
+  toState         WorkflowState   @relation("TransitionTo", fields: [toStateId], references: [id], onDelete: Cascade)
+  approvals       Approval[]
+
+  @@unique([workflowVersionId, name])
+  @@index([workflowVersionId])
+  @@index([fromStateId])
+}
+
+enum ItemStatus {
+  ACTIVE
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model Item {
+  id                String     @id @default(uuid())
+  tenantId          String
+  workflowId        String
+  workflowVersionId String
+  currentStateId    String
+  status            ItemStatus @default(ACTIVE)
+  title             String?
+  data              Json?
+  /// Optimistic locking version — incremented on successful transition.
+  version           Int        @default(1)
+  createdById       String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workflow        Workflow         @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  workflowVersion WorkflowVersion  @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
+  currentState    WorkflowState    @relation("ItemCurrentState", fields: [currentStateId], references: [id], onDelete: Restrict)
+  transitions     ItemTransition[]
+  approvals       Approval[]
+  escalations     Escalation[]
+  creator         User?            @relation("ItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([workflowVersionId])
+  @@index([currentStateId])
+  @@index([status])
+}
+
+model ItemTransition {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  itemId               String
+  workflowTransitionId String?
+  fromStateId          String
+  toStateId            String?
+  performedById        String?
+  idempotencyKey       String?
+  comment              String?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+
+  item        Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  performedBy User? @relation("ItemTransitionActor", fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@unique([itemId, idempotencyKey])
+  @@index([itemId])
+  @@index([tenantId])
+}
+
+model Approval {
+  id                   String         @id @default(uuid())
+  tenantId             String
+  itemId               String
+  workflowTransitionId String
+  status               ApprovalStatus @default(PENDING)
+  mode                 ApprovalMode
+  quorumRequired       Int?
+  createdAt            DateTime       @default(now())
+  resolvedAt           DateTime?
+
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item               Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  workflowTransition WorkflowTransition @relation(fields: [workflowTransitionId], references: [id], onDelete: Cascade)
+  votes              ApprovalVote[]
+
+  @@index([tenantId])
+  @@index([itemId])
+  @@index([status])
+}
+
+model ApprovalVote {
+  id                  String            @id @default(uuid())
+  approvalId          String
+  /// Logical assignee (who was asked). Actual actor may differ when delegated.
+  assigneeUserId      String
+  decision            ApprovalDecision?
+  delegatedFromUserId String?
+  comment             String?
+  createdAt           DateTime          @default(now())
+  decidedAt           DateTime?
+
+  approval Approval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  assignee User     @relation("ApprovalVoteAssignee", fields: [assigneeUserId], references: [id], onDelete: Cascade)
+
+  @@unique([approvalId, assigneeUserId])
+  @@index([approvalId])
+}
+
+model Delegation {
+  id         String   @id @default(uuid())
+  tenantId   String
+  fromUserId String
+  toUserId   String
+  active     Boolean  @default(true)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromUser User   @relation("DelegationFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User   @relation("DelegationTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([fromUserId, toUserId])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  tenantId   String
+  action     AuditAction
+  actorId    String?
+  entityType String
+  entityId   String
+  metadata   Json        @default("{}")
+  createdAt  DateTime    @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model SlaRule {
+  id                String   @id @default(uuid())
+  tenantId          String
+  workflowVersionId String
+  workflowStateId   String
+  name              String
+  durationMinutes   Int
+  priority          String?
+  escalateToUserId  String?
+  metadata          Json?
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  workflowState   WorkflowState   @relation(fields: [workflowStateId], references: [id], onDelete: Cascade)
+  escalations     Escalation[]
+
+  @@index([tenantId])
+  @@index([workflowVersionId])
+}
+
+model Escalation {
+  id        String   @id @default(uuid())
+  tenantId  String
+  itemId    String
+  slaRuleId String
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item    Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  slaRule SlaRule @relation(fields: [slaRuleId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+}
