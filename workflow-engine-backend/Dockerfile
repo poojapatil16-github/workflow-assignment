@@ -16,7 +16,9 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm install prisma@7.8.0 --no-save
 COPY prisma ./prisma
 COPY prisma.config.ts ./
+COPY entrypoint.sh ./
+RUN chmod +x entrypoint.sh
 COPY --from=build /app/generated ./generated
 COPY --from=build /app/dist ./dist
 EXPOSE 3000
-CMD ["node", "dist/server.js"]
+CMD ["./entrypoint.sh"]

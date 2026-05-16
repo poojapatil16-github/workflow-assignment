@@ -9,11 +9,16 @@ import { defineConfig } from 'prisma/config';
 const datasourceUrl =
   process.env.DATABASE_URL ?? 'postgresql://127.0.0.1:5432/postgres?schema=public';
 
+const seedCommand =
+  process.env.NODE_ENV === 'production'
+    ? 'node dist/seed.js'
+    : 'node --import tsx prisma/seed.ts';
+
 export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
     path: 'prisma/migrations',
-    seed: 'node --import tsx prisma/seed.ts',
+    seed: seedCommand,
   },
   datasource: {
     url: datasourceUrl,
