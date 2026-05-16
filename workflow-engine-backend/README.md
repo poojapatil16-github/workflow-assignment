@@ -1,222 +1,393 @@
 # Workflow Engine Backend
 
-Production-oriented **Express 5 + TypeScript + Prisma + PostgreSQL** service for a **multi-tenant workflow and approval engine** with strict tenant isolation, workflow versioning, optimistic locking, idempotent transitions, immutable audit logs, delegations, and SLA rule storage (escalation-ready).
+A multi-tenant workflow and approval engine built with:
 
-## Quick start
+* Express 5
+* TypeScript
+* Prisma ORM
+* PostgreSQL
+* Docker
 
-1. **Clone and Install**
+# Features
 
-   ```bash
-   npm install
-   cd workflow-engine-frontend && npm install && cd ..
-   ```
+* Multi-tenant workflow system
+* Workflow versioning
+* Approval system
+* Item transitions
+* Delegation support
+* SLA tracking
+* Audit logs
+* Optimistic locking
+* Idempotent transitions
+* Swagger API documentation
 
-   Use **Node.js 20.19+**, **22.12+**, or **24+** (required by Prisma ORM 7).
+---
 
-2. **Docker Support (Recommended)**
+# Tech Stack
 
-   The project includes a full Docker setup for the database, backend, and frontend.
+* Node.js
+* Express.js
+* TypeScript
+* Prisma ORM
+* PostgreSQL
+* Docker
+* Swagger
 
-   ```bash
-   docker-compose up --build -d
-   ```
+---
 
-   - Frontend: `http://localhost` (Port 80)
-   - Backend API: `http://localhost:3000`
-   - Database: `localhost:5432`
-
-   After starting, run migrations and seed (inside backend container or locally if configured):
-   ```bash
-   docker-compose exec backend npx prisma migrate deploy
-   docker-compose exec backend npx prisma db seed
-   ```
-
-3. **Manual Start (Alternative)**
-
-   **Start PostgreSQL**
-   ```bash
-   docker-compose up -d db
-   ```
-
-   **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Set JWT_SECRET in .env
-   ```
-
-   **Backend Setup**
-   ```bash
-   npx prisma generate
-   npx prisma migrate dev
-   npx prisma db seed
-   npm run dev
-   ```
-
-   **Frontend Setup**
-   ```bash
-   cd workflow-engine-frontend
-   npm run dev
-   ```
-
-- Health: `GET http://localhost:3000/health`
-- Swagger UI: `http://localhost:3000/api-docs`
-- API base: `http://localhost:3000/api/v1`
-
-### Seed credentials
-
-| Role  | Email                 | Password               |
-|-------|------------------------|------------------------|
-| Admin | `admin@workflow.com`   | `Admin123!Admin123!`   |
-| User  | `user@workflow.com`    | `User123!User123!`     |
-
-Tenant slug: `acme`. Use `X-Tenant-Id: <tenant-uuid>` after resolving the tenant id (returned from login flows or `GET /api/v1/tenants`).
-
-## Architecture
-
-- **HTTP layer**: thin controllers under `src/modules/*` wiring validation and responses.
-- **Domain services**: orchestration and Prisma transactions (`*.service.ts`).
-- **Cross-cutting**: middleware (`auth`, `tenant`, `roles`, `errors`, structured request logging), centralized `AppError`, Zod validation helpers.
-- **Persistence**: Prisma models with explicit `tenantId` on tenant-owned rows; every tenant-scoped query filters by `tenantId` from validated membership (see `tenant.middleware.ts`).
-- **Auth**: Case-insensitive email uniqueness and login.
-- **Workflow Engine**: Terminal state handling (`REJECTED` terminates journeys).
-- **Approvals**: Centralized permission logic with dynamic delegation support.
-- **SLA**: Manual escalation and breach detection.
-- **Performance**: Optimistic locking and transaction-safe transitions.
-
-### Prisma ORM 7 configuration
-
-- **`prisma/schema.prisma`**: `datasource` declares `provider` only (no `url` here). `generator client` sets `output = "../generated/prisma"`.
-- **`prisma.config.ts`**: supplies `datasource.url` via `env('DATABASE_URL')` for Migrate and other CLI commands, plus `migrations.seed`.
-- **Runtime client**: `src/prisma.ts` builds `PrismaClient` with **`@prisma/adapter-pg`** and `DATABASE_URL` by default, or with **`accelerateUrl`** when `PRISMA_ACCELERATE_URL` is set (see [Prisma 7 client config](https://pris.ly/d/prisma7-client-config)).
-- The `npm run build` script runs **`prisma generate`** first, then `tsc` (the `generated/` directory is gitignored).
-
-### Tenant isolation
-
-- Clients send **`X-Tenant-Id`** on tenant routes.
-- `tenantMiddleware` loads membership for `(userId, tenantId)` and sets `req.tenantId` / `req.tenantRole`.
-- Services additionally scope Prisma queries by `tenantId` to avoid accidental cross-tenant reads.
-
-### Workflow versioning
-
-- Each `Workflow` owns many `WorkflowVersion` rows (`version` integer, `DRAFT` | `PUBLISHED` | `ARCHIVED`).
-- **Never mutate** published graph data in place: new edits create a **new draft version** (`POST /workflows/:id/version`).
-- **Publish** (`POST /workflows/:id/publish` with `{ "versionId": "..." }`) validates the graph, archives any previously `PUBLISHED` version for that workflow, and marks the target version `PUBLISHED`.
-
-### Workflow validation
-
-- Exactly **one** initial state.
-- Unique state names per version.
-- Transitions reference states within the same version.
-- Approval transitions require `approvalMode`, approvers, and quorum rules when applicable.
-
-### Items, transitions, approvals
-
-- Items bind to a **published** `workflowVersionId` and a `currentStateId`.
-- `POST /items/:id/transitions` validates:
-
-  1. Tenant + membership
-  2. Transition belongs to the item’s workflow version
-  3. Current state matches transition’s `fromStateId`
-  4. **Optimistic lock**: `clientVersion` must match `items.version`; successful updates increment `version`
-  5. If `requiresApproval`, creates `Approval` + `ApprovalVote` rows and records an `ItemTransition` row with `toStateId = null` and metadata linking the approval
-  6. Otherwise updates state, writes `ItemTransition`, and appends audit `ITEM_TRANSITIONED`
-
-### Idempotency
-
-- Optional header **`Idempotency-Key`** on `POST /items/:id/transitions`.
-- First successful request persists `ItemTransition` with `(itemId, idempotencyKey)` unique; retries return the stored row and current item snapshot.
-
-### Approvals (SINGLE / ALL / QUORUM)
-
-- Votes are per assignee (`ApprovalVote`), with `@@unique([approvalId, assigneeUserId])`.
-- **Delegation**: an actor may satisfy another user’s slot when an active `Delegation` exists from assignee → actor within the window; `delegatedFromUserId` records the assignee principal.
-- Outcome evaluation rejects on any **REJECT** vote, otherwise applies mode rules; on final **APPROVED**, the transition is applied in the same transaction with version checks.
-
-### Observability & Logging
-
-- **Structured Logging**: Consistent logging across all modules using a centralized logger.
-- **Context Propagation**: Automatic propagation of `requestId`, `userId`, and `tenantId` through all service layers using `AsyncLocalStorage`.
-- **Request Tracing**: Every request is assigned a unique `requestId` for end-to-end tracing.
-- **Secure Logs**: Sensitive data (passwords, tokens) and PII (emails) are automatically masked or excluded from logs.
-- **Error Observability**: Detailed error logging including stack traces and sanitized request context.
-
-### SLA & Escalation
-
-- `SlaRule` ties a `workflowVersionId` + `workflowStateId` to `durationMinutes` and optional `escalateToUserId`.
-- Items can be checked for SLA breaches.
-- `recordSlaEscalationAudit` is a **hook** for schedulers to emit `SLA_ESCALATION` audit entries.
-- UI supports manual "Escalate" action for breached items.
-
-### Approval Delegation
-
-- Approvers can delegate their authority to eligible `CREATOR` users within the same tenant.
-- Delegation is persistent until manually removed.
-- Delegated users receive dynamic `APPROVER` permissions for the duration of the delegation.
-- Original approver loses authority while delegation is active.
-
-### Terminal States
-
-- Items can reach terminal states: `APPROVED`, `REJECTED`, `COMPLETED`.
-- `REJECTED` state immediately terminates the workflow journey.
-- No further transitions are allowed once an item reaches a terminal state.
-
-## Docker image
+# Project Structure
 
 ```bash
-docker build -t workflow-engine-api .
+workflow-engine/
+├── src/
+├── prisma/
+├── workflow-engine-frontend/
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
 ```
 
-The `Dockerfile` installs the Prisma CLI in the runtime image so you can run migrations in your orchestrator (`prisma migrate deploy`) before starting `node dist/server.js`.
+---
 
-## API examples
+# Requirements
 
-### Login
+* Node.js `20+`
+* Docker Desktop
+* PostgreSQL (only for local setup)
+
+---
+
+# Quick Start (Docker Recommended)
+
+## 1. Install Docker
+
+Install Docker Desktop:
+
+* Windows / Mac:
+
+  * [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
+
+---
+
+## 2. Start Application
+
+From project root:
 
 ```bash
-curl -s -X POST http://localhost:3000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@acme.example","password":"Admin123!Admin123!"}'
+docker compose up --build -d
 ```
 
-### Tenant-scoped call
+This starts:
+
+| Service      | URL                                                              |
+| ------------ | ---------------------------------------------------------------- |
+| Frontend     | [http://localhost](http://localhost)                             |
+| Backend API  | [http://localhost:3000](http://localhost:3000)                   |
+| Swagger Docs | [http://localhost:3000/api-docs](http://localhost:3000/api-docs) |
+| PostgreSQL   | localhost:5432                                                   |
+
+---
+
+## 3. Run Database Migration
 
 ```bash
-TOKEN=... # from login
-TENANT=... # tenant UUID
-
-curl -s http://localhost:3000/api/v1/items \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-Id: $TENANT"
+docker compose exec backend npx prisma migrate deploy
 ```
 
-### Transition with idempotency + optimistic version
+---
+
+## 4. Run Seed Data
 
 ```bash
-curl -s -X POST http://localhost:3000/api/v1/items/$ITEM_ID/transitions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-Id: $TENANT" \
-  -H "Idempotency-Key: demo-key-1" \
-  -H "Content-Type: application/json" \
-  -d '{"transitionId":"...","clientVersion":1}'
+docker compose exec backend npx prisma db seed
 ```
 
-## Scripts
+---
 
-| Script            | Description                    |
-|-------------------|--------------------------------|
-| `npm run dev`     | Run API with `tsx` (ESM)       |
-| `npm run build`   | `prisma generate` then emit `dist/` |
-| `npm start`       | Run compiled `dist/server.js`  |
-| `npm run prisma:generate` | `prisma generate`        |
-| `npm run prisma:migrate`  | `prisma migrate dev`     |
-| `npm run prisma:deploy`   | `prisma migrate deploy`  |
-| `npm run prisma:seed`     | `prisma db seed`         |
+## 5. Check Backend Logs
 
-## OpenAPI / Swagger
+```bash
+docker compose logs -f backend
+```
 
-- Served at **`/api-docs`**.
-- Built with **`swagger-jsdoc`** (see `src/config/swagger-annotations.ts`) merged with the programmatic document in `src/config/openapi-spec.ts`.
+You should see:
 
-## License
+```bash
+Seed complete
+```
+
+---
+
+# Seed Users
+
+| Role     | Email                                                 | Password |
+| -------- | ----------------------------------------------------- | -------- |
+| Admin    | [admin@workflow.com](mailto:admin@workflow.com)       | Pass@321 |
+| Creator  | [creater@workflow.com](mailto:creater@workflow.com)   | Pass@321 |
+| Approver | [approver@workflow.com](mailto:approver@workflow.com) | Pass@321 |
+
+---
+
+# Seeded Tenant
+
+| Name        | Slug        |
+| ----------- | ----------- |
+| Amer Center | amer-center |
+
+---
+
+# Seeded Workflow
+
+## Workflow Name
+
+```text
+Dubai Visa Process
+```
+
+## States
+
+```text
+draft → review → approved
+```
+
+## Flow
+
+* Creator creates item
+* Approver approves item
+* Item moves to approved state
+
+---
+
+# Local Development Setup
+
+## 1. Install Dependencies
+
+### Backend
+
+```bash
+npm install
+```
+
+### Frontend
+
+```bash
+cd workflow-engine-frontend
+npm install
+cd ..
+```
+
+---
+
+## 2. Setup Environment
+
+Create `.env` file:
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/workflow_engine"
+JWT_SECRET="your-secret"
+PORT=3000
+```
+
+---
+
+## 3. Start PostgreSQL
+
+```bash
+docker compose up -d db
+```
+
+---
+
+## 4. Generate Prisma Client
+
+```bash
+npx prisma generate
+```
+
+---
+
+## 5. Run Migration
+
+```bash
+npx prisma migrate dev
+```
+
+---
+
+## 6. Run Seed
+
+```bash
+npx prisma db seed
+```
+
+---
+
+## 7. Start Backend
+
+```bash
+npm run dev
+```
+
+Backend runs on:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## 8. Start Frontend
+
+```bash
+cd workflow-engine-frontend
+npm run dev
+```
+
+Frontend runs on:
+
+```text
+http://localhost:5173
+```
+
+---
+
+# API Endpoints
+
+## Health Check
+
+```http
+GET /health
+```
+
+Example:
+
+```bash
+curl http://localhost:3000/health
+```
+
+---
+
+## Swagger API Docs
+
+```text
+http://localhost:3000/api-docs
+```
+
+---
+
+## API Base URL
+
+```text
+http://localhost:3000/api/v1
+```
+
+---
+
+# Authentication Example
+
+## Login
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+-H "Content-Type: application/json" \
+-d '{
+  "email":"admin@workflow.com",
+  "password":"Pass@321"
+}'
+```
+
+---
+
+# Tenant Header
+
+For tenant APIs send:
+
+```http
+X-Tenant-Id: <tenant-id>
+```
+
+---
+
+# Important Scripts
+
+| Script                  | Description                  |
+| ----------------------- | ---------------------------- |
+| npm run dev             | Start backend in development |
+| npm run build           | Build backend                |
+| npm start               | Start production server      |
+| npm run prisma:generate | Generate Prisma client       |
+| npm run prisma:migrate  | Run Prisma migration         |
+| npm run prisma:deploy   | Deploy migrations            |
+| npm run prisma:seed     | Run seed data                |
+
+---
+
+# Docker Commands
+
+## Start Containers
+
+```bash
+docker compose up --build -d
+```
+
+## Stop Containers
+
+```bash
+docker compose down
+```
+
+## View Logs
+
+```bash
+docker compose logs -f
+```
+
+## Restart Containers
+
+```bash
+docker compose restart
+```
+
+---
+
+# Main Workflow Concepts
+
+## Workflow
+
+Defines process steps and transitions.
+
+Example:
+
+```text
+draft → review → approved
+```
+
+---
+
+## Item
+
+An item moves through workflow states.
+
+Example:
+
+```text
+Visa Application
+```
+
+---
+
+## Approval
+
+Approvers can approve or reject workflow items.
+
+---
+
+## SLA
+
+Tracks delayed items and escalation rules.
+
+---
+
+# License
 
 MIT

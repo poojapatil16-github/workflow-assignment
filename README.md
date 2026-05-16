@@ -1,120 +1,94 @@
-# Workflow Engine Assignment
+# Workflow Engine Backend
 
-A production-oriented multi-tenant workflow and approval engine built with:
+A multi-tenant workflow and approval engine built with:
 
-- **Backend**: Express 5 + TypeScript + Prisma + PostgreSQL
-- **Frontend**: React + TypeScript + Vite
-- **Database**: PostgreSQL
-- **Containerization**: Docker + Docker Compose
+* Express 5
+* TypeScript
+* Prisma ORM
+* PostgreSQL
+* Docker
 
-The system supports workflow creation, approvals, delegation, SLA tracking, audit logging, and strict tenant isolation.
+# Features
+
+* Multi-tenant workflow system
+* Workflow versioning
+* Approval system
+* Item transitions
+* Delegation support
+* SLA tracking
+* Audit logs
+* Optimistic locking
+* Idempotent transitions
+* Swagger API documentation
+
+---
+
+# Tech Stack
+
+* Node.js
+* Express.js
+* TypeScript
+* Prisma ORM
+* PostgreSQL
+* Docker
+* Swagger
 
 ---
 
 # Project Structure
 
-```text
-workflow-assignment/
-├── backend/                 # Express + Prisma API
-├── frontend/                # React frontend
+```bash
+workflow-engine/
+├── src/
+├── prisma/
+├── workflow-engine-frontend/
+├── Dockerfile
 ├── docker-compose.yml
 └── README.md
 ```
 
 ---
 
-# Features
+# Requirements
 
-## Backend
-
-- Multi-tenant architecture
-- Workflow versioning
-- Approval engine (Single / All / Quorum)
-- Delegation support
-- Optimistic locking
-- Idempotent transitions
-- Immutable audit logs
-- SLA rule storage and escalation support
-- Swagger/OpenAPI documentation
-- Prisma ORM with PostgreSQL
-
-## Frontend
-
-- Workflow builder UI
-- Item lifecycle management
-- Approval dashboards
-- Delegation management
-- SLA monitoring
-- Responsive UI
-- Role-based access control
+* Node.js `20+`
+* Docker Desktop
+* PostgreSQL (only for local setup)
 
 ---
 
-# Tech Stack
+# Quick Start (Docker Recommended)
 
-## Backend
+## 1. Install Docker
 
-- Node.js
-- Express 5
-- TypeScript
-- Prisma ORM
-- PostgreSQL
-- Zod validation
-- JWT authentication
+Install Docker Desktop:
 
-## Frontend
+* Windows / Mac:
 
-- React
-- TypeScript
-- Vite
-- Zustand
-- Tailwind CSS
-- React Router
-- Axios
-
----
-
-# Prerequisites
-
-Install:
-
-- Docker
-- Docker Compose
-
-Recommended:
-
-- Node.js 20.19+ (only needed for local non-docker development)
-
----
-
-# Quick Start (Recommended)
-
-## 1. Clone Repository
-
-```bash
-git clone <your-repository-url>
-cd workflow-assignment
-```
+  * [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
 
 ---
 
 ## 2. Start Application
 
+From project root:
+
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
 This starts:
 
-- PostgreSQL database
-- Backend API
-- Frontend application
+| Service      | URL                                                              |
+| ------------ | ---------------------------------------------------------------- |
+| Frontend     | [http://localhost](http://localhost)                             |
+| Backend API  | [http://localhost:3000](http://localhost:3000)                   |
+| Swagger Docs | [http://localhost:3000/api-docs](http://localhost:3000/api-docs) |
+| PostgreSQL   | localhost:5432                                                   |
 
 ---
 
-## 3. Run Database Migrations
-
-Open a new terminal:
+## 3. Run Database Migration
 
 ```bash
 docker compose exec backend npx prisma migrate deploy
@@ -122,7 +96,7 @@ docker compose exec backend npx prisma migrate deploy
 
 ---
 
-## 4. Seed Database
+## 4. Run Seed Data
 
 ```bash
 docker compose exec backend npx prisma db seed
@@ -130,44 +104,178 @@ docker compose exec backend npx prisma db seed
 
 ---
 
-# Application URLs
+## 5. Check Backend Logs
 
-| Service | URL |
-|---|---|
-| Frontend | http://localhost |
-| Backend API | http://localhost:3000 |
-| Swagger Docs | http://localhost:3000/api-docs |
-| Health Check | http://localhost:3000/health |
-| PostgreSQL | localhost:5432 |
+```bash
+docker compose logs -f backend
+```
 
----
+You should see:
 
-# Seed Credentials
-
-| Role | Email | Password |
-|---|---|---|
-| Admin | admin@workflow.com | Admin123!Admin123! |
-| User | user@workflow.com | User123!User123! |
+```bash
+Seed complete
+```
 
 ---
 
-# Tenant Information
+# Seed Users
 
-Tenant slug:
+| Role     | Email                                                 | Password |
+| -------- | ----------------------------------------------------- | -------- |
+| Admin    | [admin@workflow.com](mailto:admin@workflow.com)       | Pass@321 |
+| Creator  | [creater@workflow.com](mailto:creater@workflow.com)   | Pass@321 |
+| Approver | [approver@workflow.com](mailto:approver@workflow.com) | Pass@321 |
+
+---
+
+# Seeded Tenant
+
+| Name        | Slug        |
+| ----------- | ----------- |
+| Amer Center | amer-center |
+
+---
+
+# Seeded Workflow
+
+## Workflow Name
 
 ```text
-acme
+Dubai Visa Process
 ```
 
-Tenant-scoped APIs require:
+## States
 
-```http
-X-Tenant-Id: <tenant-uuid>
+```text
+draft → review → approved
+```
+
+## Flow
+
+* Creator creates item
+* Approver approves item
+* Item moves to approved state
+
+---
+
+# Local Development Setup
+
+## 1. Install Dependencies
+
+### Backend
+
+```bash
+npm install
+```
+
+### Frontend
+
+```bash
+cd workflow-engine-frontend
+npm install
+cd ..
 ```
 
 ---
 
-# API Base URL
+## 2. Setup Environment
+
+Create `.env` file:
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/workflow_engine"
+JWT_SECRET="your-secret"
+PORT=3000
+```
+
+---
+
+## 3. Start PostgreSQL
+
+```bash
+docker compose up -d db
+```
+
+---
+
+## 4. Generate Prisma Client
+
+```bash
+npx prisma generate
+```
+
+---
+
+## 5. Run Migration
+
+```bash
+npx prisma migrate dev
+```
+
+---
+
+## 6. Run Seed
+
+```bash
+npx prisma db seed
+```
+
+---
+
+## 7. Start Backend
+
+```bash
+npm run dev
+```
+
+Backend runs on:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## 8. Start Frontend
+
+```bash
+cd workflow-engine-frontend
+npm run dev
+```
+
+Frontend runs on:
+
+```text
+http://localhost:5173
+```
+
+---
+
+# API Endpoints
+
+## Health Check
+
+```http
+GET /health
+```
+
+Example:
+
+```bash
+curl http://localhost:3000/health
+```
+
+---
+
+## Swagger API Docs
+
+```text
+http://localhost:3000/api-docs
+```
+
+---
+
+## API Base URL
 
 ```text
 http://localhost:3000/api/v1
@@ -175,140 +283,54 @@ http://localhost:3000/api/v1
 
 ---
 
-# Example Login Request
+# Authentication Example
+
+## Login
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "email":"admin@workflow.com",
-    "password":"Admin123!Admin123!"
-  }'
+-H "Content-Type: application/json" \
+-d '{
+  "email":"admin@workflow.com",
+  "password":"Pass@321"
+}'
 ```
 
 ---
 
-# Manual Development Setup (Optional)
+# Tenant Header
 
-## Backend
-
-```bash
-cd backend
-
-npm install
-
-cp .env.example .env
-
-npx prisma generate
-npx prisma migrate dev
-npx prisma db seed
-
-npm run dev
-```
-
----
-
-## Frontend
-
-```bash
-cd frontend
-
-npm install
-
-npm run dev
-```
-
----
-
-# Backend Architecture
-
-- Thin controllers
-- Service-layer business logic
-- Prisma transactions
-- Tenant-scoped queries
-- Structured logging
-- Centralized error handling
-- Workflow versioning
-- Approval orchestration
-
----
-
-# Important Workflow Features
-
-## Workflow Versioning
-
-Published workflows are immutable.
-
-Changes create new draft versions.
-
----
-
-## Approvals
-
-Supports:
-
-- SINGLE
-- ALL
-- QUORUM
-
-Approval rejections immediately terminate workflow progression.
-
----
-
-## Delegation
-
-Approvers can delegate approval authority to eligible users within the same tenant.
-
----
-
-## Optimistic Locking
-
-Workflow item transitions use version-based optimistic concurrency control.
-
----
-
-## Idempotency
-
-Transition APIs support:
+For tenant APIs send:
 
 ```http
-Idempotency-Key
+X-Tenant-Id: <tenant-id>
 ```
 
-to safely retry requests.
+---
+
+# Important Scripts
+
+| Script                  | Description                  |
+| ----------------------- | ---------------------------- |
+| npm run dev             | Start backend in development |
+| npm run build           | Build backend                |
+| npm start               | Start production server      |
+| npm run prisma:generate | Generate Prisma client       |
+| npm run prisma:migrate  | Run Prisma migration         |
+| npm run prisma:deploy   | Deploy migrations            |
+| npm run prisma:seed     | Run seed data                |
 
 ---
 
-# Frontend Features
+# Docker Commands
 
-- Workflow builder
-- Approval management
-- SLA monitoring
-- Delegation UI
-- Responsive dashboards
-- Role-based access
-
----
-
-# Docker Notes
-
-The application uses a single `docker-compose.yml` file to orchestrate:
-
-- PostgreSQL
-- Backend API
-- Frontend
-
----
-
-# Useful Commands
-
-## Start
+## Start Containers
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
-## Stop
+## Stop Containers
 
 ```bash
 docker compose down
@@ -320,7 +342,7 @@ docker compose down
 docker compose logs -f
 ```
 
-## Restart
+## Restart Containers
 
 ```bash
 docker compose restart
@@ -328,12 +350,41 @@ docker compose restart
 
 ---
 
-# Assumptions / Notes
+# Main Workflow Concepts
 
-- PostgreSQL runs locally inside Docker
-- Default ports are exposed for local development
-- Seed data is included for demonstration/testing
-- Frontend communicates with backend through Docker networking
+## Workflow
+
+Defines process steps and transitions.
+
+Example:
+
+```text
+draft → review → approved
+```
+
+---
+
+## Item
+
+An item moves through workflow states.
+
+Example:
+
+```text
+Visa Application
+```
+
+---
+
+## Approval
+
+Approvers can approve or reject workflow items.
+
+---
+
+## SLA
+
+Tracks delayed items and escalation rules.
 
 ---
 
